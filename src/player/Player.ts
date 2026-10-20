@@ -24,6 +24,7 @@ export class Player {
   private readonly basisX = new Vector3();
   private readonly basisZ = new Vector3();
   private readonly basis = new Matrix4();
+  private readonly axis = new Vector3();
   private readonly half = new Vector3();
   private readonly absG = new Vector3();
   private readonly delta = new Vector3();
@@ -39,7 +40,7 @@ export class Player {
     this.mesh.position.copy(start);
   }
 
-    private moveAxis(axis: Axis, d: number, gAxis: number, colliders: ReadonlyArray<Aabb>, bound: number): void {
+  private moveAxis(axis: Axis, d: number, gAxis: number, colliders: ReadonlyArray<Aabb>, bound: number): void {
     const pos = this.mesh.position;
     const h = this.half[axis];
     pos[axis] += d;
@@ -54,6 +55,19 @@ export class Player {
       pos[axis] = d > 0 ? b.min[axis] - h : b.max[axis] + h;
       this.onHit(d, gAxis);
     }
+  }
+
+  private rotateUpToward(target: Vector3, t: number): void {
+    const angle = Math.acos(Math.max(-1, Math.min(1, this.visualUp.dot(target))));
+    if (angle < 1e-4) {
+      this.visualUp.copy(target);
+      return;
+    }
+    // Opposite vectors have no single rotation axis, so fall back to the heading
+    this.axis.crossVectors(this.visualUp, target);
+    if (this.axis.lengthSq() < 1e-8) this.axis.copy(this.heading);
+    this.axis.normalize();
+    this.visualUp.applyAxisAngle(this.axis, angle * t).normalize();
   }
 
   private onHit(d: number, gAxis: number): void {
@@ -104,7 +118,7 @@ export class Player {
     if (this.grounded && this.fallSpeed > 0) this.fallSpeed = 0;
 
     // Smooth "up" so the world flip feels like a roll, not a snap
-    this.visualUp.lerp(this.up, 1 - Math.exp(-10 * dt)).normalize();
+    this.rotateUpToward(this.up, 1 - Math.exp(-10 * dt));
 
     // Face movement direction
     if (this.wish.lengthSq() > 0.01) {

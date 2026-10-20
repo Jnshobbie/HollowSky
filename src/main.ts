@@ -1,28 +1,13 @@
-import {
-  AmbientLight,
-  BackSide,
-  BoxGeometry,
-  EdgesGeometry,
-  Fog,
-  HemisphereLight,
-  LineBasicMaterial,
-  LineSegments,
-  Mesh,
-  MeshStandardMaterial,
-  PerspectiveCamera,
-  Scene,
-  Vector3,
-  WebGLRenderer,
-  CanvasTexture,
-  DoubleSide,
-  MeshBasicMaterial,
-  PlaneGeometry,
-} from 'three';
+import { DoubleSide, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Scene, Vector3, WebGLRenderer } from 'three';
 import { ThirdPersonCamera } from './camera/ThirdPersonCamera';
 import { TouchControls } from './input/TouchControls';
 import { Player } from './player/Player';
 import { GravityManager } from './world/GravityManager';
 import { City } from './world/City';
+import { Look } from './render/Look';
+import { createArena } from './world/Arena';
+import { Dust } from './world/Dust';
+import { createFacades } from './world/Facades'; 
 
 const ARENA = 60;
 const HALF = ARENA / 2;
@@ -36,35 +21,11 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new Scene();
 scene.background = null;
-scene.fog = new Fog(0x0b1020, 20, 90);
-scene.add(new AmbientLight(0xffffff, 0.6));
-scene.add(new HemisphereLight(0xaad4ff, 0x223344, 1.2));
 
-const arenaGeo = new BoxGeometry(ARENA, ARENA, ARENA);
-const gridCanvas = document.createElement('canvas');
-gridCanvas.width = 512;
-gridCanvas.height = 512;
-const ctx = gridCanvas.getContext('2d');
-if (ctx) {
-  ctx.fillStyle = '#1b2433';
-  ctx.fillRect(0, 0, 512, 512);
-  ctx.strokeStyle = '#3a5a80';
-  ctx.lineWidth = 2;
-  const step = 512 / 20;
-  for (let i = 0; i <= 20; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * step, 0);
-    ctx.lineTo(i * step, 512);
-    ctx.moveTo(0, i * step);
-    ctx.lineTo(512, i * step);
-    ctx.stroke();
-  }
-}
-const gridTex = new CanvasTexture(gridCanvas);
-scene.add(new Mesh(arenaGeo, new MeshStandardMaterial({ map: gridTex, side: BackSide, roughness: 0.9 })));
-scene.add(new LineSegments(new EdgesGeometry(arenaGeo), new LineBasicMaterial({ color: 0x4fd1ff })));
+
+scene.add(createArena(ARENA, 6));
 const city = new City(HALF);
-scene.add(city.mesh);
+scene.add(createFacades(city.colliders, HALF));
 
 // Orange tint on the wall that is about to become the floor
 const tintMat = new MeshBasicMaterial({
@@ -79,9 +40,13 @@ tint.visible = false;
 scene.add(tint);
 
 const camera = new PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 200);
+const fx = new Look(renderer, scene, camera);
+const dust = new Dust(260, HALF);
+scene.add(dust.points);
 const chase = new ThirdPersonCamera(camera);
 const player = new Player(new Vector3(0, -HALF + 0.8, 0));
 scene.add(player.mesh);
+player.mesh.castShadow = true;
 
 const controls = new TouchControls(document.body);
 
@@ -140,7 +105,7 @@ const tick = (now: number): void => {
   player.update(dt, controls.state, gravity.direction, chase.forward, HALF, city.colliders);
   chase.update(player.mesh.position, player.visualUp);
   camera.position.clampScalar(-(HALF - 0.3), HALF - 0.3);
-  
+
   if (warning) {
     tint.visible = true;
     tint.position.copy(gravity.next).multiplyScalar(HALF - 0.05);
@@ -152,7 +117,9 @@ const tick = (now: number): void => {
     arrow.style.transform = `rotate(${Math.atan2(arrowDir.x, arrowDir.y)}rad)`;
   }
 
-  renderer.render(scene, camera);
+  fx.update(now, player.visualUp);
+  dust.update(dt, gravity.direction, now);
+  fx.render();
   requestAnimationFrame(tick);
 };
 requestAnimationFrame(tick);
