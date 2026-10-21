@@ -7,6 +7,7 @@ const SPEED = 8;
 const GRAVITY = 28;
 const JUMP = 11;
 const MAX_FALL = 30;
+const TURN = 14; // rad/s, a 180° turn takes about 0.22 s
 
 type Axis = 'x' | 'y' | 'z';
 const AXES: ReadonlyArray<Axis> = ['x', 'y', 'z'];
@@ -48,6 +49,7 @@ export class Player {
       const model: Object3D = gltf.scene;
       model.scale.setScalar(0.9);
       model.position.y = -0.8; // feet at the bottom of the collider
+      model.rotation.y = Math.PI; //
       model.traverse((o) => {
         o.castShadow = true;
         o.frustumCulled = false; // skinned bounds are unreliable
@@ -158,7 +160,14 @@ export class Player {
 
     // Face movement direction
     if (this.wish.lengthSq() > 0.01) {
-      this.heading.lerp(this.wish.clone().normalize(), 1 - Math.exp(-12 * dt));
+      const target = this.wish.clone().normalize();
+      const ang = this.heading.angleTo(target);
+      if (ang > 1e-4) {
+        this.axis.crossVectors(this.heading, target);
+        if (this.axis.lengthSq() < 1e-8) this.axis.copy(this.visualUp);
+        this.axis.normalize();
+        this.heading.applyAxisAngle(this.axis, Math.min(ang, TURN * dt));
+      }
     }
     this.heading.addScaledVector(this.visualUp, -this.heading.dot(this.visualUp));
     if (this.heading.lengthSq() < 1e-6) this.heading.copy(this.fwd);

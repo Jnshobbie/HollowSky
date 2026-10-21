@@ -8,7 +8,7 @@ import { Look } from './render/Look';
 import { createArena } from './world/Arena';
 import { Dust } from './world/Dust';
 import { createFacades } from './world/Facades'; 
-import { loadCharacter } from './player/Character';
+
 
 const ARENA = 60;
 const HALF = ARENA / 2;
@@ -46,8 +46,6 @@ const dust = new Dust(260, HALF);
 scene.add(dust.points);
 const chase = new ThirdPersonCamera(camera);
 const player = new Player(new Vector3(0, -HALF + 0.8, 0));
-const character = await loadCharacter('/models/jake_1024.glb');
-player.mesh.add(character.root);
 
 scene.add(player.mesh);
 
