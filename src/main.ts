@@ -3,11 +3,12 @@ import { ThirdPersonCamera } from './camera/ThirdPersonCamera';
 import { TouchControls } from './input/TouchControls';
 import { Player } from './player/Player';
 import { GravityManager } from './world/GravityManager';
-import { City } from './world/City';
+import { ProceduralCity } from './world/ProceduralCity';
 import { Look } from './render/Look';
 import { createArena } from './world/Arena';
 import { Dust } from './world/Dust';
 import { createFacades } from './world/Facades'; 
+import { loadCharacter } from './player/Character';
 
 const ARENA = 60;
 const HALF = ARENA / 2;
@@ -24,7 +25,7 @@ scene.background = null;
 
 
 scene.add(createArena(ARENA, 6));
-const city = new City(HALF);
+const city = new ProceduralCity(HALF)
 scene.add(createFacades(city.colliders, HALF));
 
 // Orange tint on the wall that is about to become the floor
@@ -45,6 +46,9 @@ const dust = new Dust(260, HALF);
 scene.add(dust.points);
 const chase = new ThirdPersonCamera(camera);
 const player = new Player(new Vector3(0, -HALF + 0.8, 0));
+const character = await loadCharacter('/models/jake_1024.glb');
+player.mesh.add(character.root);
+
 scene.add(player.mesh);
 player.mesh.castShadow = true;
 
