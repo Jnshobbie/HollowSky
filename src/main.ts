@@ -50,7 +50,6 @@ const character = await loadCharacter('/models/jake_1024.glb');
 player.mesh.add(character.root);
 
 scene.add(player.mesh);
-player.mesh.castShadow = true;
 
 const controls = new TouchControls(document.body);
 

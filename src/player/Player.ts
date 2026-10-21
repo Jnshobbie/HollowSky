@@ -1,4 +1,5 @@
-import { BoxGeometry, CapsuleGeometry, Matrix4, Mesh, MeshStandardMaterial, Vector3 } from 'three';
+import { AnimationAction, AnimationMixer, BoxGeometry, CapsuleGeometry, Group, LoopOnce, Matrix4, Mesh, MeshStandardMaterial, Object3D, Vector3 } from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { InputState } from '../input/TouchControls';
 import type { Aabb } from '../world/City';
 
@@ -11,7 +12,10 @@ type Axis = 'x' | 'y' | 'z';
 const AXES: ReadonlyArray<Axis> = ['x', 'y', 'z'];
 
 export class Player {
-  readonly mesh: Mesh;
+  readonly mesh = new Group();
+  private mixer?: AnimationMixer;
+  private actions: Record<string, AnimationAction> = {};
+  private current = '';
   readonly visualUp = new Vector3(0, 1, 0);
   grounded = false;
 
@@ -30,14 +34,46 @@ export class Player {
   private readonly delta = new Vector3();
 
   constructor(start: Vector3) {
-    this.mesh = new Mesh(
+    const placeholder = new Mesh(
       new CapsuleGeometry(0.35, 0.9, 4, 8),
       new MeshStandardMaterial({ color: 0xffc857 }),
     );
     const nose = new Mesh(new BoxGeometry(0.2, 0.2, 0.3), new MeshStandardMaterial({ color: 0xff5a36 }));
     nose.position.set(0, 0.3, 0.4);
-    this.mesh.add(nose);
+    placeholder.add(nose);
+    this.mesh.add(placeholder);
     this.mesh.position.copy(start);
+
+    new GLTFLoader().load(`${import.meta.env.BASE_URL}models/jake.glb`, (gltf) => {
+      const model: Object3D = gltf.scene;
+      model.scale.setScalar(0.9);
+      model.position.y = -0.8; // feet at the bottom of the collider
+      model.traverse((o) => {
+        o.castShadow = true;
+        o.frustumCulled = false; // skinned bounds are unreliable
+      });
+      this.mesh.remove(placeholder);
+      this.mesh.add(model);
+      this.mixer = new AnimationMixer(model);
+      for (const clip of gltf.animations) this.actions[clip.name] = this.mixer.clipAction(clip);
+      this.actions.Jump?.setLoop(LoopOnce, 1);
+      if (this.actions.Jump) this.actions.Jump.clampWhenFinished = true;
+      this.play('Idle');
+    });
+  }
+
+  private play(name: string): void {
+    const next = this.actions[name];
+    if (!next || name === this.current) return;
+    next.reset().fadeIn(0.15).play();
+    this.actions[this.current]?.fadeOut(0.15);
+    this.current = name;
+  }
+
+  private animate(dt: number): void {
+    if (!this.mixer) return;
+    this.play(!this.grounded ? 'Jump' : this.wish.lengthSq() > 0.01 ? 'Run' : 'Idle');
+    this.mixer.update(dt);
   }
 
   private moveAxis(axis: Axis, d: number, gAxis: number, colliders: ReadonlyArray<Aabb>, bound: number): void {
@@ -132,5 +168,6 @@ export class Player {
     this.basisX.crossVectors(this.visualUp, this.basisZ);
     this.basis.makeBasis(this.basisX, this.visualUp, this.basisZ);
     this.mesh.quaternion.setFromRotationMatrix(this.basis);
+    this.animate(dt);
   }
 }
