@@ -49,7 +49,6 @@ export class Player {
       const model: Object3D = gltf.scene;
       model.scale.setScalar(0.9);
       model.position.y = -0.8; // feet at the bottom of the collider
-      model.rotation.y = Math.PI; //
       model.traverse((o) => {
         o.castShadow = true;
         o.frustumCulled = false; // skinned bounds are unreliable
