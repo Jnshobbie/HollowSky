@@ -1,20 +1,29 @@
 import {
   BufferAttribute,
   BufferGeometry,
-  CanvasTexture,
   Color,
   Mesh,
   MeshStandardMaterial,
   RepeatWrapping,
   SRGBColorSpace,
+  TextureLoader,
+  Vector2,
 } from 'three';
+import type { Texture } from 'three';
 import type { Aabb } from './City';
 import { mulberry32 } from './rng';
 
-const CELL_W = 3; // world units per window bay
-const CELL_H = 3.2; // world units per floor
-const TILE = 4; // bays/floors per texture tile
+/** Real PBR facades (public/textures/<dir>). w/h = world units covered by one texture tile: tune to resize the windows. */
+const KINDS: ReadonlyArray<{ dir: string; w: number; h: number }> = [
+  { dir: 'Facade020B', w: 18, h: 27 },
+  { dir: 'Facade018A', w: 10.4, h: 20.8 },
+  { dir: 'Facade014', w: 50, h: 50 },
+];
+const ROOF = { dir: 'RoofingTiles001', size: 6 };
+const WINDOW_GLOW = 1.4; // brightness of the lit windows
+const TINT = 0.25; // how much of the old per-building colour is mixed in (0 = pure texture)
 const PALETTE: ReadonlyArray<number> = [0xb9b2a5, 0x9c9488, 0x8c5b47, 0xa88f6d, 0x6a737c];
+const WHITE = new Color(0xffffff);
 const CORNERS: ReadonlyArray<readonly [number, number]> = [
   [-1, -1],
   [1, -1],
@@ -22,63 +31,14 @@ const CORNERS: ReadonlyArray<readonly [number, number]> = [
   [-1, 1],
 ];
 
-function makeWindowTextures(): { color: CanvasTexture; lit: CanvasTexture } {
-  const rand = mulberry32(7);
-  const S = 256;
-  const c = S / TILE;
-  const colorCanvas = document.createElement('canvas');
-  const litCanvas = document.createElement('canvas');
-  colorCanvas.width = colorCanvas.height = S;
-  litCanvas.width = litCanvas.height = S;
-  const g = colorCanvas.getContext('2d');
-  const l = litCanvas.getContext('2d');
-  if (!g || !l) throw new Error('2D canvas unavailable');
-
-  g.fillStyle = '#ffffff';
-  g.fillRect(0, 0, S, S);
-  for (let i = 0; i < 500; i++) {
-    g.fillStyle = `rgba(0,0,0,${0.02 + rand() * 0.05})`;
-    g.fillRect(rand() * S, rand() * S, 2 + rand() * 6, 2 + rand() * 6);
-  }
-  l.fillStyle = '#000000';
-  l.fillRect(0, 0, S, S);
-
-  for (let y = 0; y < TILE; y++) {
-    for (let x = 0; x < TILE; x++) {
-      const gx = x * c + 12;
-      const gy = y * c + 10;
-      const gw = c - 24;
-      const gh = c - 22;
-      const grad = g.createLinearGradient(0, gy, 0, gy + gh);
-      grad.addColorStop(0, '#9bb4cb');
-      grad.addColorStop(1, '#4a5d73');
-      g.fillStyle = grad;
-      g.fillRect(gx, gy, gw, gh);
-      g.fillStyle = '#c9c2b4';
-      g.fillRect(gx - 3, gy + gh, gw + 6, 4); // window sill
-      g.strokeStyle = '#2b2b2b';
-      g.lineWidth = 2;
-      g.strokeRect(gx, gy, gw, gh);
-      g.beginPath();
-      g.moveTo(gx + gw / 2, gy);
-      g.lineTo(gx + gw / 2, gy + gh);
-      g.stroke();
-      if (rand() < 0.16) {
-        l.fillStyle = '#ffb866';
-        l.fillRect(gx + 2, gy + 2, gw - 4, gh - 4);
-      }
-    }
-  }
-
-  const prep = (canvas: HTMLCanvasElement): CanvasTexture => {
-    const t = new CanvasTexture(canvas);
-    t.wrapS = RepeatWrapping;
-    t.wrapT = RepeatWrapping;
-    t.colorSpace = SRGBColorSpace;
-    t.anisotropy = 4;
-    return t;
-  };
-  return { color: prep(colorCanvas), lit: prep(litCanvas) };
+const loader = new TextureLoader();
+function tex(path: string, srgb: boolean): Texture {
+  const t = loader.load(`${import.meta.env.BASE_URL}textures/${path}`);
+  t.wrapS = RepeatWrapping;
+  t.wrapT = RepeatWrapping;
+  t.anisotropy = 4;
+  if (srgb) t.colorSpace = SRGBColorSpace;
+  return t;
 }
 
 /**
@@ -92,7 +52,7 @@ export function createFacades(colliders: ReadonlyArray<Aabb>, half: number): Mes
   const nor: number[] = [];
   const uv: number[] = [];
   const col: number[] = [];
-  const facadeIdx: number[] = [];
+  const facadeIdx: number[][] = KINDS.map(() => []);
   const roofIdx: number[] = [];
   const color = new Color();
 
@@ -116,6 +76,10 @@ export function createFacades(colliders: ReadonlyArray<Aabb>, half: number): Mes
     const sz = [0, 1, 2].map((k) => hi[k] - lo[k]);
     const base = PALETTE[Math.floor(rand() * PALETTE.length)];
     const tone = 0.85 + rand() * 0.25;
+    const kind = Math.floor(rand() * KINDS.length);
+    const K = KINDS[kind] ?? KINDS[0];
+    if (!K) continue;
+    const uOff = rand() * K.w;
 
     for (let k = 0; k < 3; k++) {
       for (const sigma of [-1, 1]) {
@@ -137,19 +101,19 @@ export function createFacades(colliders: ReadonlyArray<Aabb>, half: number): Mes
 
           const dist = Math.abs(p[a] - s * half); // height above the street
           if (roof) {
-            uv.push(p[t1] / 10, p[t2] / 10);
+            uv.push(p[t1] / ROOF.size, p[t2] / ROOF.size);
           } else {
             const other = 3 - k - a;
-            uv.push(p[other] / (CELL_W * TILE), dist / (CELL_H * TILE));
+            uv.push((p[other] + uOff) / K.w, dist / K.h);
           }
 
           // Fake ambient occlusion: darker near the street, lighter up high
-          const shade = roof ? 0.85 : 0.7 + 0.3 * Math.min(1, dist / sz[a]);
-          color.setHex(base).multiplyScalar(tone * shade);
+          const shade = roof ? 1.1 : 0.7 + 0.3 * Math.min(1, dist / sz[a]);
+          color.setHex(base).lerp(WHITE, 1 - TINT).multiplyScalar(tone * shade);
           col.push(color.r, color.g, color.b);
         }
 
-        const idx = roof ? roofIdx : facadeIdx;
+        const idx = roof ? roofIdx : (facadeIdx[kind] ?? roofIdx);
         if (sigma > 0) idx.push(first, first + 1, first + 2, first, first + 2, first + 3);
         else idx.push(first, first + 2, first + 1, first, first + 3, first + 2);
       }
@@ -161,22 +125,35 @@ export function createFacades(colliders: ReadonlyArray<Aabb>, half: number): Mes
   geo.setAttribute('normal', new BufferAttribute(new Float32Array(nor), 3));
   geo.setAttribute('uv', new BufferAttribute(new Float32Array(uv), 2));
   geo.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
-  geo.setIndex(new BufferAttribute(new Uint32Array([...facadeIdx, ...roofIdx]), 1));
-  geo.addGroup(0, facadeIdx.length, 0);
-  geo.addGroup(facadeIdx.length, roofIdx.length, 1);
-
-  const tex = makeWindowTextures();
-  const facadeMat = new MeshStandardMaterial({
-    map: tex.color,
-    emissiveMap: tex.lit,
-    emissive: 0xffffff,
-    emissiveIntensity: 1.1,
-    vertexColors: true,
-    roughness: 0.9,
+  geo.setIndex(new BufferAttribute(new Uint32Array([...facadeIdx.flat(), ...roofIdx]), 1));
+  let offset = 0;
+  facadeIdx.forEach((list, i) => {
+    geo.addGroup(offset, list.length, i);
+    offset += list.length;
   });
-  const roofMat = new MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+  geo.addGroup(offset, roofIdx.length, KINDS.length);
 
-  const mesh = new Mesh(geo, [facadeMat, roofMat]);
+  const mats = KINDS.map((k) => {
+    const m = new MeshStandardMaterial({
+      map: tex(`${k.dir}/color.jpg`, true),
+      normalMap: tex(`${k.dir}/normal.jpg`, false),
+      normalScale: new Vector2(0.8, 0.8),
+      emissiveMap: tex(`${k.dir}/emission.jpg`, true),
+      emissive: 0xffffff,
+      emissiveIntensity: WINDOW_GLOW,
+      vertexColors: true,
+      roughness: 0.7,
+    });
+    return m;
+  });
+  const roofMat = new MeshStandardMaterial({
+    map: tex(`${ROOF.dir}/color.jpg`, true),
+    normalMap: tex(`${ROOF.dir}/normal.jpg`, false),
+    vertexColors: true,
+    roughness: 0.95,
+  });
+
+  const mesh = new Mesh(geo, [...mats, roofMat]);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;

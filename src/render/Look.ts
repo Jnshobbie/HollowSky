@@ -2,14 +2,17 @@ import {
   ACESFilmicToneMapping,
   Color,
   DirectionalLight,
+  EquirectangularReflectionMapping,
   Fog,
   HemisphereLight,
   PCFShadowMap,
+  PMREMGenerator,
   Quaternion,
   Vector2,
   Vector3,
 } from 'three';
 import type { PerspectiveCamera, Scene, WebGLRenderer } from 'three';
+import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -20,6 +23,9 @@ type Level = 0 | 1 | 2 | 3; // 3 = bloom + shadows, 2 = shadows, 1 = plain, 0 = 
 const HAZE = 0xdcc7a4;
 const SUN_DIR = new Vector3(0.55, 0.75, 0.35).normalize(); // relative to the starting "up"
 const LOW_FPS = 42;
+const SKY = 'hdri/evening.exr'; // or 'hdri/night-aurora.exr'
+const SKY_LIGHT = 0.6; // strength of the sky reflections and ambient light
+const Y_AXIS = new Vector3(0, 1, 0);
 
 /**
  * Lighting, haze, shadows, bloom and automatic quality.
@@ -67,7 +73,7 @@ export class Look {
     scene.background = new Color(HAZE);
     scene.fog = new Fog(HAZE, 22, 95);
 
-    this.hemi = new HemisphereLight(0xfff0d8, 0x8a735c, 1.6);
+    this.hemi = new HemisphereLight(0xfff0d8, 0x8a735c, 1.1);
     scene.add(this.hemi);
 
     this.sun = new DirectionalLight(0xffd29a, 4.2);
@@ -91,6 +97,7 @@ export class Look {
     );
     this.composer.addPass(new OutputPass());
     this.applyLevel();
+    this.loadSky();
 
     const vignette = document.createElement('div');
     vignette.style.cssText =
@@ -111,6 +118,18 @@ export class Look {
     });
   }
 
+  /** Real HDRI sky used for reflections and ambient light (the scene keeps its haze background). */
+  private loadSky(): void {
+    new EXRLoader().load(`${import.meta.env.BASE_URL}${SKY}`, (hdr) => {
+      hdr.mapping = EquirectangularReflectionMapping;
+      const pmrem = new PMREMGenerator(this.renderer);
+      this.scene.environment = pmrem.fromEquirectangular(hdr).texture;
+      this.scene.environmentIntensity = SKY_LIGHT;
+      hdr.dispose();
+      pmrem.dispose();
+    });
+  }
+
   /** Call once per frame before render(). `up` is the smoothed gravity "up". */
   update(now: number, up: Vector3): void {
     // The sun turns with gravity, so shadows always fall toward the current floor
@@ -119,6 +138,8 @@ export class Look {
     this.prevUp.copy(up);
     this.sun.position.copy(this.sunDir).multiplyScalar(75);
     this.hemi.position.copy(up);
+    // keep the sky's "up" aligned with gravity so reflections follow the shifts
+    this.scene.environmentRotation.setFromQuaternion(this.q.setFromUnitVectors(up, Y_AXIS));
     this.adapt(now);
   }
 
